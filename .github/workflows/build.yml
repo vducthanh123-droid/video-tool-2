@@ -1,0 +1,32 @@
+name: Build EXE
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller openai-whisper
+
+      - name: Build EXE
+        run: |
+          python -m PyInstaller --onefile --windowed --clean --collect-all whisper --collect-all torch --collect-all torchaudio --add-binary "ffmpeg.exe;." gui_pro.py
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-tool-exe
+          path: dist/gui_pro.exe
