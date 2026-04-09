@@ -21,6 +21,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller openai-whisper
 
+      - name: Download FFmpeg
+        run: |
+          curl -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+          tar -xf ffmpeg.zip
+          move ffmpeg-*-essentials_build/bin/ffmpeg.exe .
+
       - name: Build EXE
         run: |
           python -m PyInstaller --onefile --windowed --clean --collect-all whisper --collect-all torch --collect-all torchaudio --add-binary "ffmpeg.exe;." gui_pro.py
