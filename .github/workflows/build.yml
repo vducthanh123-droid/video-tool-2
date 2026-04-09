@@ -1,212 +1,38 @@
-import tkinter as tk
-from tkinter import filedialog, messagebox
-import threading
-import os
-import json
-import whisper
+name: Build EXE
 
-# cache model để không load lại nhiều lần
-model_cache = None
+on:
+  workflow_dispatch:
 
-def log(msg):
-    console.insert(tk.END, msg + "\n")
-    console.see(tk.END)
+jobs:
+  build:
+    runs-on: windows-latest
 
-# =========================
-# TRANSCRIBE (FIX TREO)
-# =========================
-def transcribe(audio_path):
-    global model_cache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    log("Loading Whisper model...")
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-    os.environ["WHISPER_CACHE"] = "./models"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller openai-whisper
 
-    # load 1 lần duy nhất
-    if model_cache is None:
-        model_cache = whisper.load_model("tiny")  # 🔥 FIX CHÍNH
+      - name: Download FFmpeg
+        run: |
+          curl -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+          tar -xf ffmpeg.zip
+          move ffmpeg-*-essentials_build/bin/ffmpeg.exe .
 
-    model = model_cache
+      - name: Build EXE
+        run: |
+          python -m PyInstaller --onefile --windowed --clean --collect-all whisper --collect-all torch --collect-all torchaudio --add-binary "ffmpeg.exe;." gui_pro.py
 
-    log("Model loaded. Transcribing audio...")
-
-    result = model.transcribe(audio_path)
-
-    log("Processing segments...")
-
-    segments = []
-    for i, seg in enumerate(result["segments"]):
-        segments.append({
-            "text": seg["text"],
-            "start": seg["start"],
-            "end": seg["end"]
-        })
-
-        # progress log
-        if i % 10 == 0:
-            log(f"Processed {i+1} segments...")
-
-    return segments
-
-# =========================
-# CREATE SCENES
-# =========================
-def create_scenes(segments, total_prompts):
-    total_time = segments[-1]["end"]
-    target = total_time / max(total_prompts, 1)
-
-    scenes = []
-    current = []
-    start_time = None
-    scene_id = 1
-
-    for seg in segments:
-        if start_time is None:
-            start_time = seg["start"]
-
-        current.append(seg)
-
-        if seg["end"] - start_time >= target:
-            scene_text = " ".join(s["text"] for s in current).strip()
-
-            scenes.append({
-                "scene_id": f"SCENE_{scene_id:03d}",
-                "start_time_sec": round(start_time, 2),
-                "end_time_sec": round(seg["end"], 2),
-                "duration_sec": round(seg["end"] - start_time, 2),
-                "transcript": scene_text
-            })
-
-            scene_id += 1
-            current = []
-            start_time = None
-
-    # phần dư cuối
-    if current and start_time is not None:
-        scene_text = " ".join(s["text"] for s in current).strip()
-        scenes.append({
-            "scene_id": f"SCENE_{scene_id:03d}",
-            "start_time_sec": round(start_time, 2),
-            "end_time_sec": round(current[-1]["end"], 2),
-            "duration_sec": round(current[-1]["end"] - start_time, 2),
-            "transcript": scene_text
-        })
-
-    return scenes
-
-# =========================
-# GENERATE PROMPTS (VEO3)
-# =========================
-def generate_prompt(scene):
-    return {
-        "scene_id": scene["scene_id"],
-        "duration_sec": scene["duration_sec"],
-        "pacing": "cinematic",
-
-        "characters_in_scene": [
-            {
-                "character_id": "CHAR_001",
-                "character_name": "Emily Carter",
-                "identity_anchor": "elegant woman, late 20s, calm expression, sharp eyes, light skin, dark brown hair tied low",
-                "voice_profile": "calm controlled",
-                "regional_accent": "american",
-                "dialogue_language": "english"
-            }
-        ],
-
-        "motion_beats": [
-            {
-                "order": 1,
-                "start_sec": 0,
-                "end_sec": scene["duration_sec"],
-                "active_character_ids": ["CHAR_001"],
-                "character_motion": "subtle gestures, controlled posture",
-                "camera_motion": "slow cinematic push",
-                "environment_motion": "soft ambient movement",
-                "dialogue": scene["transcript"]
-            }
-        ],
-
-        "negative_constraints": [
-            "violence",
-            "gore",
-            "nudity",
-            "blurry face"
-        ]
-    }
-
-def convert_to_prompts(scenes):
-    return [generate_prompt(s) for s in scenes]
-
-# =========================
-# SAVE OUTPUT
-# =========================
-def save_prompts(prompts):
-    os.makedirs("output", exist_ok=True)
-
-    with open("output/final_prompts.json", "w", encoding="utf-8") as f:
-        json.dump(prompts, f, ensure_ascii=False, indent=2)
-
-# =========================
-# PIPELINE
-# =========================
-def run_pipeline():
-    try:
-        audio = audio_path.get().strip()
-        prompts_count = int(prompt_count.get().strip() or "30")
-
-        if not audio:
-            messagebox.showerror("Error", "Select audio file")
-            return
-
-        log("=== START ===")
-
-        log("Step 1/4: Transcribing...")
-        segments = transcribe(audio)
-
-        log("Step 2/4: Creating scenes...")
-        scenes = create_scenes(segments, prompts_count)
-
-        log("Step 3/4: Generating prompts...")
-        prompts = convert_to_prompts(scenes)
-
-        log("Step 4/4: Saving...")
-        save_prompts(prompts)
-
-        log(f"Done! {len(prompts)} prompts created")
-        log("Saved to output/final_prompts.json")
-
-    except Exception as e:
-        messagebox.showerror("Error", str(e))
-        log(f"Error: {e}")
-
-def start():
-    threading.Thread(target=run_pipeline, daemon=True).start()
-
-def select_audio():
-    file_path = filedialog.askopenfilename(filetypes=[("MP3 files", "*.mp3")])
-    audio_path.set(file_path)
-
-# =========================
-# UI
-# =========================
-root = tk.Tk()
-root.title("VEO3 Prompt Generator (PRO)")
-root.geometry("700x500")
-
-audio_path = tk.StringVar()
-prompt_count = tk.StringVar(value="30")
-
-tk.Label(root, text="Audio (.mp3)").pack(pady=5)
-tk.Entry(root, textvariable=audio_path, width=70).pack()
-tk.Button(root, text="Select Audio", command=select_audio).pack(pady=5)
-
-tk.Label(root, text="Number of Prompts").pack()
-tk.Entry(root, textvariable=prompt_count).pack()
-
-tk.Button(root, text="Generate", command=start, bg="green", fg="white").pack(pady=10)
-
-console = tk.Text(root, height=18)
-console.pack(fill="both", expand=True)
-
-root.mainloop()
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-tool-exe
+          path: dist/gui_pro.exe
